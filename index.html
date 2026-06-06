@@ -190,16 +190,55 @@
 </div>
 
 <canvas id="work" class="hidden"></canvas>
-<script async src="https://docs.opencv.org/4.10.0/opencv.js" id="ocv"></script>
+
+<!-- エンジン読込オーバーレイ(状態を必ず可視化) -->
+<div id="loader" style="position:fixed;inset:0;z-index:99;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;text-align:center;padding:30px;
+  background:rgba(14,20,25,.94);backdrop-filter:blur(4px)">
+  <div style="font-family:'Shippori Mincho',serif;font-size:22px;color:#e7cf86;letter-spacing:.1em">GYOTAK KOMON</div>
+  <div class="spin" style="width:24px;height:24px"></div>
+  <div id="loader-msg" style="font-size:13px;color:#8aa0b4;line-height:1.7;max-width:300px">認識エンジンを読み込み中…<br>初回は8MBほどダウンロードします</div>
+  <button id="loader-retry" class="btn" style="display:none;max-width:240px">再試行</button>
+  <div id="loader-tip" style="font-size:11px;color:#5a6b7a;line-height:1.7;max-width:300px"></div>
+</div>
+
+<script>
+/* ============ opencv.js ロバスト・ローダ(複数CDN + タイムアウト + 再試行) ============ */
+const CV_CDNS=[
+  "https://docs.opencv.org/4.10.0/opencv.js",
+  "https://docs.opencv.org/4.x/opencv.js",
+  "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js"
+];
+const lmsg=(h)=>{const e=document.getElementById('loader-msg');if(e)e.innerHTML=h;};
+const ltip=(h)=>{const e=document.getElementById('loader-tip');if(e)e.innerHTML=h;};
+function loadCv(i=0){
+  if(i>=CV_CDNS.length){
+    lmsg("エンジンの読み込みに失敗しました。");
+    ltip("ネットワークか広告ブロックが原因のことが多いです。Braveならライオン🦁→Shieldsをオフにして再試行を。Wi-Fi切替も有効。");
+    const r=document.getElementById('loader-retry'); r.style.display='block'; r.onclick=()=>{r.style.display='none';loadCv(0);};
+    return;
+  }
+  lmsg(`認識エンジンを読み込み中…<br>(ソース ${i+1}/${CV_CDNS.length})`);
+  const s=document.createElement('script'); s.async=true; s.src=CV_CDNS[i];
+  let done=false;
+  const to=setTimeout(()=>{ if(done)return; done=true; s.remove(); loadCv(i+1); }, 30000);
+  s.onerror=()=>{ if(done)return; done=true; clearTimeout(to); s.remove(); loadCv(i+1); };
+  s.onload =()=>{ if(done)return; done=true; clearTimeout(to); };
+  document.body.appendChild(s);
+}
+</script>
 <script>
 /* ============================================================ KOMON core */
 const MAXDIM=1000, ORB_N=1500, RATIO=0.75, RANSAC_PX=6.0;
 const THRESHOLD={generic:0.13, eps:0.13, durian:0.13};
 let cvReady=false;
-function markReady(){if(cvReady)return;cvReady=true;setStatus('reg-status','');setStatus('ver-status','');}
-// 公式コールバック + ポーリング(cv.Matが使えるか)の二段構えで確実に検出
+function markReady(){if(cvReady)return;cvReady=true;
+  const l=document.getElementById('loader');if(l)l.style.display='none';
+  setStatus('reg-status','');setStatus('ver-status','');}
 window.Module={onRuntimeInitialized:markReady};
-(function poll(){ if(typeof cv!=='undefined' && cv && cv.Mat){markReady();} else setTimeout(poll,120); })();
+// CDNローダ開始 → 読込後ポーリングで cv.Mat 使用可を検出
+loadCv(0);
+(function poll(){ if(typeof cv!=='undefined' && cv && cv.Mat){markReady();} else setTimeout(poll,150); })();
 
 function setStatus(id,html){const e=document.getElementById(id);if(e)e.innerHTML=html;}
 function busy(id,msg){setStatus(id,`<span class="spin"></span>${msg}`);}
