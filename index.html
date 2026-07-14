@@ -375,6 +375,11 @@ document.getElementById('reg-do').onclick=async()=>{
   document.getElementById('reg-result').innerHTML=receiptHTML(item,gps);
   regCap=null; document.getElementById('reg-do').disabled=true;
 };
+// Ingest endpoint (set at build time or hardcoded for Pages deploy)
+const KOMON_API='https://line-harness.gyotak.workers.dev/gyotak';
+// KOMON_INGEST_SECRET: injected at build time. For dev/test, set window.KOMON_INGEST_SECRET.
+const KOMON_SECRET=window.KOMON_INGEST_SECRET||'';
+
 function receiptHTML(it,gps){
   const gpsLine = it.privacy_mode==='disclosed'
     ? (gps?`<b>${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}</b>（公開）`:'取得できず')
@@ -388,7 +393,55 @@ function receiptHTML(it,gps){
       写真ハッシュ: <code>${it.photo_hash}</code><br>
       特徴点: <b>${it.n_minutiae}</b> 個 ／ モード: <b>${it.privacy_mode}</b><br>
       登録: <b>${it.registered_at.replace('T',' ').slice(0,19)}</b>
-    </div></div>`;
+    </div>
+    <button class="btn" style="margin-top:14px;font-size:13px" onclick="registerToD1('${it.komon_id}')">
+      ⛓️ D1 + Midnight に登録
+    </button>
+    <div id="d1-status-${it.komon_id}" style="font-size:12px;color:var(--mist);margin-top:8px;text-align:center"></div>
+    </div>`;
+}
+
+/* opt-in: POST to /komon/register (commit is computed server-side) */
+async function registerToD1(komonId){
+  const statusEl=document.getElementById('d1-status-'+komonId);
+  if(!statusEl)return;
+  if(!KOMON_SECRET){statusEl.innerHTML='<span style="color:var(--ng)">KOMON_INGEST_SECRET が未設定</span>';return;}
+  statusEl.innerHTML='<span class="spin"></span>送信中…';
+  // Retrieve item from IndexedDB
+  const items=await all();
+  const item=items.find(i=>i.komon_id===komonId);
+  if(!item){statusEl.innerHTML='<span style="color:var(--ng)">台帳に見つかりません</span>';return;}
+  // Build request body — commit is NOT sent (Worker computes it server-side)
+  const body={
+    komon_id:item.komon_id,
+    material:item.material,
+    privacy_mode:item.privacy_mode,
+    region:item.region||'',
+    photo_hash:item.photo_hash,
+    n_minutiae:item.n_minutiae,
+    registered_at:item.registered_at
+  };
+  // Send GPS for both modes (Worker stores shielded GPS in isolated table only; mirror needs it for range proof)
+  if(item.gps_lat!=null){
+    body.gps_lat=item.gps_lat;
+    body.gps_lng=item.gps_lng;
+  }
+  try{
+    const res=await fetch(KOMON_API+'/komon/register',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+KOMON_SECRET},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+    if(res.ok && data.success){
+      statusEl.innerHTML='<span style="color:var(--ok)">✓ D1 登録完了</span>'
+        +(data.komon_commit?'<br><code style="font-size:10px;color:var(--kin2)">commit: '+data.komon_commit.slice(0,16)+'…</code>':'');
+    } else {
+      statusEl.innerHTML='<span style="color:var(--ng)">'+((data.error||'').includes('already')?'既に登録済み':data.error||'送信失敗')+'</span>';
+    }
+  }catch(e){
+    statusEl.innerHTML='<span style="color:var(--ng)">ネットワークエラー</span>';
+  }
 }
 
 /* ============================================================ VERIFY flow */
